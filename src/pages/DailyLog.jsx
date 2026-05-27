@@ -245,7 +245,7 @@ export default function DailyLog() {
       console.error(err)
       setSaveStatus('error')
     }
-  }, [uploadedPhotoUrls, vitaminD, milkEntries, solidEntries, napEntries, supplies, otherNotes, currentUser, userProfile, today])
+  }, [arrivalTime, departureTime, uploadedPhotoUrls, vitaminD, milkEntries, solidEntries, napEntries, supplies, otherNotes, currentUser, userProfile, today])
 
   // Debounced auto-save whenever form fields change
   useEffect(() => {

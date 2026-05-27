@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { collection, query, where, getDocs } from 'firebase/firestore'
+import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -27,6 +27,47 @@ function formatHours(h) {
 }
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+
+function getFederalHolidays(year) {
+  const h = new Map()
+  function fmt(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  function observed(m, day, name) {
+    const d = new Date(year, m - 1, day)
+    const w = d.getDay()
+    if (w === 6) d.setDate(d.getDate() - 1)
+    else if (w === 0) d.setDate(d.getDate() + 1)
+    h.set(fmt(d), name)
+  }
+  function nthMonday(m, n, name) {
+    const d = new Date(year, m - 1, 1)
+    let count = 0
+    while (true) { if (d.getDay() === 1 && ++count === n) { h.set(fmt(d), name); return } d.setDate(d.getDate() + 1) }
+  }
+  function lastMonday(m, name) {
+    const d = new Date(year, m, 0)
+    while (d.getDay() !== 1) d.setDate(d.getDate() - 1)
+    h.set(fmt(d), name)
+  }
+  function nthThursday(m, n, name) {
+    const d = new Date(year, m - 1, 1)
+    let count = 0
+    while (true) { if (d.getDay() === 4 && ++count === n) { h.set(fmt(d), name); return } d.setDate(d.getDate() + 1) }
+  }
+  observed(1, 1, "New Year's Day")
+  nthMonday(1, 3, 'MLK Day')
+  nthMonday(2, 3, "Presidents' Day")
+  lastMonday(5, 'Memorial Day')
+  observed(6, 19, 'Juneteenth')
+  observed(7, 4, 'Independence Day')
+  nthMonday(9, 1, 'Labor Day')
+  nthMonday(10, 2, 'Columbus Day')
+  observed(11, 11, 'Veterans Day')
+  nthThursday(11, 4, 'Thanksgiving')
+  observed(12, 25, 'Christmas Day')
+  return h
+}
 
 function napDuration(start, end) {
   if (!start || !end) return null
@@ -71,28 +112,24 @@ export default function Dashboard() {
   const isFriday = new Date().getDay() === 5
 
   useEffect(() => {
-    async function fetchToday() {
-      const q = query(collection(db, 'logs'), where('date', '==', today))
-      const snap = await getDocs(q)
-      setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-      setLoading(false)
-    }
+    const monday = getMondayOfWeek(new Date())
 
-    async function fetchWeek() {
-      const monday = getMondayOfWeek(new Date())
-      const q = query(
-        collection(db, 'logs'),
-        where('date', '>=', monday),
-        where('date', '<=', today)
-      )
-      const snap = await getDocs(q)
-      setWeekLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    }
+    const unsubToday = onSnapshot(
+      query(collection(db, 'logs'), where('date', '==', today)),
+      snap => {
+        setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+        setLoading(false)
+      }
+    )
 
-    fetchToday()
-    fetchWeek()
-    const interval = setInterval(() => { fetchToday(); fetchWeek() }, 30000)
-    return () => clearInterval(interval)
+    const unsubWeek = onSnapshot(
+      query(collection(db, 'logs'), where('date', '>=', monday), where('date', '<=', today)),
+      snap => {
+        setWeekLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      }
+    )
+
+    return () => { unsubToday(); unsubWeek() }
   }, [today])
 
   const allMilk = logs.flatMap(l => l.milk || [])
@@ -173,12 +210,21 @@ export default function Dashboard() {
               d.setDate(d.getDate() + i)
               return d.toISOString().split('T')[0]
             })
-            const byDate = {}
-            weekLogs.forEach(l => { byDate[l.date] = l })
+            const mondayYear = new Date(monday).getFullYear()
+            const holidays = getFederalHolidays(mondayYear)
+            const fridayYear = new Date(weekDays[4]).getFullYear()
+            if (fridayYear !== mondayYear) getFederalHolidays(fridayYear).forEach((name, date) => holidays.set(date, name))
+
+            const loggedByDate = {}
+            weekLogs.forEach(l => {
+              const h = hoursWorked(l.arrivalTime, l.departureTime)
+              if (h > 0) loggedByDate[l.date] = (loggedByDate[l.date] || 0) + h
+            })
             const totalHours = weekDays.reduce((sum, date) => {
-              const l = byDate[date]
-              return sum + (l ? hoursWorked(l.arrivalTime, l.departureTime) : 0)
+              const logged = loggedByDate[date] || 0
+              return sum + logged + (holidays.has(date) && logged === 0 ? 8 : 0)
             }, 0)
+            const weekHolidays = weekDays.filter(d => holidays.has(d)).map(d => holidays.get(d))
 
             return (
               <div className={`rounded-3xl p-5 ${isFriday ? 'bg-gradient-to-r from-violet-600 to-rose-500 text-white shadow-lg shadow-violet-200' : 'bg-white shadow-sm shadow-violet-100'}`}>
@@ -195,8 +241,10 @@ export default function Dashboard() {
                 </div>
                 <div className="flex gap-1">
                   {weekDays.map((date, i) => {
-                    const l = byDate[date]
-                    const hrs = l ? hoursWorked(l.arrivalTime, l.departureTime) : 0
+                    const loggedHrs = loggedByDate[date] || 0
+                    const isHoliday = holidays.has(date)
+                    const isUnloggedHoliday = isHoliday && loggedHrs === 0
+                    const hrs = loggedHrs + (isUnloggedHoliday ? 8 : 0)
                     const isToday = date === today
                     const isPast = date <= today
                     return (
@@ -207,16 +255,23 @@ export default function Dashboard() {
                         <div className={`rounded-xl py-1.5 text-xs font-bold ${
                           isToday
                             ? isFriday ? 'bg-white/30 text-white' : 'bg-violet-100 text-violet-700'
-                            : hrs > 0
-                              ? isFriday ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-700'
-                              : isFriday ? 'bg-white/10 text-white/40' : 'bg-gray-50 text-gray-300'
+                            : isUnloggedHoliday
+                              ? isFriday ? 'bg-white/20 text-yellow-200' : 'bg-amber-50 text-amber-700'
+                              : hrs > 0
+                                ? isFriday ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-700'
+                                : isFriday ? 'bg-white/10 text-white/40' : 'bg-gray-50 text-gray-300'
                         }`}>
-                          {hrs > 0 ? `${hrs.toFixed(1)}h` : isPast ? '—' : '·'}
+                          {isUnloggedHoliday ? '🏛️' : hrs > 0 ? `${hrs.toFixed(1)}h` : isPast ? '—' : '·'}
                         </div>
                       </div>
                     )
                   })}
                 </div>
+                {weekHolidays.length > 0 && (
+                  <p className={`mt-2.5 text-xs ${isFriday ? 'text-white/60' : 'text-amber-600'}`}>
+                    🏛️ {weekHolidays.join(' · ')} — paid holiday
+                  </p>
+                )}
               </div>
             )
           })()}
