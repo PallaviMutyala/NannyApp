@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import libheif from 'libheif-js/wasm-bundle'
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../firebase/config'
@@ -39,8 +38,9 @@ async function viaBitmap(file) {
   return { file: new File([blob], name, { type: 'image/jpeg' }), preview }
 }
 
-// Path 2: libheif WASM (HEIC on Chrome — dynamically imported, ~2MB one-time load)
+// Path 2: libheif WASM (HEIC on Chrome — lazy-loaded ~2MB, only when needed)
 async function viaLibheif(file) {
+  const { default: libheif } = await import('libheif-js/wasm-bundle')
   const buffer = await file.arrayBuffer()
   const decoder = new libheif.HeifDecoder()
   const images = decoder.decode(buffer)
