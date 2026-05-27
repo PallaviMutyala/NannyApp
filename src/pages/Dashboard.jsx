@@ -4,6 +4,30 @@ import { db } from '../firebase/config'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
+function getMondayOfWeek(date) {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + diff)
+  return d.toISOString().split('T')[0]
+}
+
+function hoursWorked(arrival, departure) {
+  if (!arrival || !departure) return 0
+  const [ah, am] = arrival.split(':').map(Number)
+  const [dh, dm] = departure.split(':').map(Number)
+  const mins = (dh * 60 + dm) - (ah * 60 + am)
+  return mins > 0 ? mins / 60 : 0
+}
+
+function formatHours(h) {
+  const hrs = Math.floor(h)
+  const mins = Math.round((h - hrs) * 60)
+  return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`
+}
+
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+
 function napDuration(start, end) {
   if (!start || !end) return null
   const [sh, sm] = start.split(':').map(Number)
@@ -42,19 +66,32 @@ export default function Dashboard() {
   const today = new Date().toISOString().split('T')[0]
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
+  const [weekLogs, setWeekLogs] = useState([])
   const navigate = useNavigate()
+  const isFriday = new Date().getDay() === 5
 
   useEffect(() => {
     async function fetchToday() {
-      // Query all logs for today (one doc per user per day)
       const q = query(collection(db, 'logs'), where('date', '==', today))
       const snap = await getDocs(q)
       setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
       setLoading(false)
     }
+
+    async function fetchWeek() {
+      const monday = getMondayOfWeek(new Date())
+      const q = query(
+        collection(db, 'logs'),
+        where('date', '>=', monday),
+        where('date', '<=', today)
+      )
+      const snap = await getDocs(q)
+      setWeekLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    }
+
     fetchToday()
-    // Poll every 30s so parents see nanny updates without refresh
-    const interval = setInterval(fetchToday, 30000)
+    fetchWeek()
+    const interval = setInterval(() => { fetchToday(); fetchWeek() }, 30000)
     return () => clearInterval(interval)
   }, [today])
 
@@ -127,6 +164,93 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
+
+          {/* Weekly summary — always visible, prominent on Fridays */}
+          {weekLogs.length > 0 && (() => {
+            const monday = getMondayOfWeek(new Date())
+            const weekDays = Array.from({ length: 5 }, (_, i) => {
+              const d = new Date(monday)
+              d.setDate(d.getDate() + i)
+              return d.toISOString().split('T')[0]
+            })
+            const byDate = {}
+            weekLogs.forEach(l => { byDate[l.date] = l })
+            const totalHours = weekDays.reduce((sum, date) => {
+              const l = byDate[date]
+              return sum + (l ? hoursWorked(l.arrivalTime, l.departureTime) : 0)
+            }, 0)
+
+            return (
+              <div className={`rounded-3xl p-5 ${isFriday ? 'bg-gradient-to-r from-violet-600 to-rose-500 text-white shadow-lg shadow-violet-200' : 'bg-white shadow-sm shadow-violet-100'}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-base ${isFriday ? 'bg-white/20' : 'bg-teal-100'}`}>🕐</span>
+                    <span className={`font-bold ${isFriday ? 'text-white' : 'text-gray-800'}`}>
+                      {isFriday ? 'Weekly Summary 🎉' : 'This Week'}
+                    </span>
+                  </div>
+                  <span className={`font-bold text-lg ${isFriday ? 'text-white' : 'text-teal-700'}`}>
+                    {formatHours(totalHours)} total
+                  </span>
+                </div>
+                <div className="flex gap-1">
+                  {weekDays.map((date, i) => {
+                    const l = byDate[date]
+                    const hrs = l ? hoursWorked(l.arrivalTime, l.departureTime) : 0
+                    const isToday = date === today
+                    const isPast = date <= today
+                    return (
+                      <div key={date} className="flex-1 text-center">
+                        <div className={`text-xs font-semibold mb-1 ${isFriday ? 'text-white/70' : 'text-gray-400'}`}>
+                          {DAY_NAMES[i]}
+                        </div>
+                        <div className={`rounded-xl py-1.5 text-xs font-bold ${
+                          isToday
+                            ? isFriday ? 'bg-white/30 text-white' : 'bg-violet-100 text-violet-700'
+                            : hrs > 0
+                              ? isFriday ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-700'
+                              : isFriday ? 'bg-white/10 text-white/40' : 'bg-gray-50 text-gray-300'
+                        }`}>
+                          {hrs > 0 ? `${hrs.toFixed(1)}h` : isPast ? '—' : '·'}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Schedule */}
+          {(() => {
+            const arrival = logs.find(l => l.arrivalTime)?.arrivalTime
+            const departure = logs.find(l => l.departureTime)?.departureTime
+            if (!arrival && !departure) return null
+            const hrs = hoursWorked(arrival, departure)
+            return (
+              <Card emoji="🕐" emojiColor="bg-teal-100" title="Nanny Schedule">
+                <div className="flex items-center gap-6">
+                  {arrival && (
+                    <div>
+                      <div className="text-xs text-gray-400 mb-0.5">Arrived</div>
+                      <div className="font-semibold text-gray-800">{formatTime(arrival)}</div>
+                    </div>
+                  )}
+                  {departure && (
+                    <div>
+                      <div className="text-xs text-gray-400 mb-0.5">Left</div>
+                      <div className="font-semibold text-gray-800">{formatTime(departure)}</div>
+                    </div>
+                  )}
+                  {hrs > 0 && (
+                    <div className="ml-auto bg-teal-50 text-teal-700 text-sm font-bold px-3 py-1.5 rounded-full">
+                      {formatHours(hrs)}
+                    </div>
+                  )}
+                </div>
+              </Card>
+            )
+          })()}
 
           {/* Photo feed */}
           {allPhotos.length > 0 && (

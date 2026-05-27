@@ -39,11 +39,23 @@ function DayCard({ date, entries }) {
   const allNaps = entries.flatMap(l => l.naps || [])
   const allSupplies = [...new Set(entries.flatMap(l => l.supplies || []))]
   const allPhotos = entries.flatMap(l => l.photoUrls || [])
+  const arrival = entries.find(l => l.arrivalTime)?.arrivalTime
+  const departure = entries.find(l => l.departureTime)?.departureTime
   const vitaminDGiven = entries.some(l => l.vitaminD)
   const notes = entries.map(l => l.otherNotes).filter(Boolean)
   const totalMilkOz = allMilk.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0)
 
   const chips = [
+    arrival && (() => {
+      if (arrival && departure) {
+        const [ah, am] = arrival.split(':').map(Number)
+        const [dh, dm] = departure.split(':').map(Number)
+        const mins = (dh * 60 + dm) - (ah * 60 + am)
+        const hrs = mins > 0 ? (mins / 60).toFixed(1) : null
+        return hrs ? { label: `${hrs}h`, emoji: '🕐', color: 'bg-teal-50 text-teal-600' } : null
+      }
+      return { label: formatTime(arrival), emoji: '🕐', color: 'bg-teal-50 text-teal-600' }
+    })(),
     totalMilkOz > 0 && { label: `${totalMilkOz}oz`, emoji: '🍼', color: 'bg-blue-50 text-blue-600' },
     allSolids.length > 0 && { label: `${allSolids.length} meal${allSolids.length > 1 ? 's' : ''}`, emoji: '🥣', color: 'bg-orange-50 text-orange-600' },
     allNaps.length > 0 && { label: `${allNaps.length} nap${allNaps.length > 1 ? 's' : ''}`, emoji: '😴', color: 'bg-indigo-50 text-indigo-600' },
@@ -86,6 +98,23 @@ function DayCard({ date, entries }) {
                   <img key={i} src={url} alt="" className="w-full object-cover rounded-2xl" style={{ maxHeight: '60vh' }} />
                 ))}
               </div>
+            </div>
+          )}
+
+          {(arrival || departure) && (
+            <div className="bg-teal-50 text-teal-700 text-sm rounded-2xl px-4 py-3 font-medium flex items-center gap-4">
+              <span>🕐</span>
+              {arrival && <span>Arrived {formatTime(arrival)}</span>}
+              {departure && <span>Left {formatTime(departure)}</span>}
+              {(() => {
+                if (!arrival || !departure) return null
+                const [ah, am] = arrival.split(':').map(Number)
+                const [dh, dm] = departure.split(':').map(Number)
+                const mins = (dh * 60 + dm) - (ah * 60 + am)
+                if (mins <= 0) return null
+                const h = Math.floor(mins / 60), m = mins % 60
+                return <span className="ml-auto font-bold">{h > 0 ? `${h}h ${m}m` : `${m}m`}</span>
+              })()}
             </div>
           )}
 

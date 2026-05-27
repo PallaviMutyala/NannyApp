@@ -185,6 +185,8 @@ export default function DailyLog() {
   const [pendingPreviews, setPendingPreviews] = useState([])
   const [uploadingPhotos, setUploadingPhotos] = useState(false)
 
+  const [arrivalTime, setArrivalTime] = useState('')
+  const [departureTime, setDepartureTime] = useState('')
   const [vitaminD, setVitaminD] = useState(false)
   const [milkEntries, setMilkEntries] = useState([{ time: '', amount: '' }])
   const [solidEntries, setSolidEntries] = useState([{ time: '', amount: '', food: '' }])
@@ -199,6 +201,8 @@ export default function DailyLog() {
       const snap = await getDoc(docRef)
       if (snap.exists()) {
         const d = snap.data()
+        setArrivalTime(d.arrivalTime || '')
+        setDepartureTime(d.departureTime || '')
         setVitaminD(d.vitaminD || false)
         setMilkEntries(d.milk?.length ? d.milk : [{ time: '', amount: '' }])
         setSolidEntries(d.solids?.length ? d.solids : [{ time: '', amount: '', food: '' }])
@@ -226,6 +230,8 @@ export default function DailyLog() {
         loggedBy: currentUser.uid,
         loggedByName: userProfile?.name || currentUser.displayName,
         photoUrls: overrides.photoUrls ?? uploadedPhotoUrls,
+        arrivalTime,
+        departureTime,
         vitaminD: overrides.vitaminD ?? vitaminD,
         milk: (overrides.milkEntries ?? milkEntries).filter(e => e.time || e.amount),
         solids: (overrides.solidEntries ?? solidEntries).filter(e => e.time || e.amount || e.food),
@@ -247,7 +253,7 @@ export default function DailyLog() {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => saveToFirestore(), 1500)
     return () => clearTimeout(debounceRef.current)
-  }, [vitaminD, milkEntries, solidEntries, napEntries, supplies, otherNotes, loaded])
+  }, [arrivalTime, departureTime, vitaminD, milkEntries, solidEntries, napEntries, supplies, otherNotes, loaded])
 
   async function handlePhotoSelect(e) {
     const files = Array.from(e.target.files)
@@ -357,6 +363,42 @@ export default function DailyLog() {
       </div>
 
       <div className="space-y-4">
+
+        {/* Schedule */}
+        <Section emoji="🕐" emojiColor="bg-teal-100" title="Nanny Schedule">
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-xs text-gray-400 font-medium mb-1 block">Arrived</label>
+              <input
+                type="time"
+                value={arrivalTime}
+                onChange={e => setArrivalTime(e.target.value)}
+                className="w-full border border-gray-100 bg-gray-50 rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 focus:bg-white transition"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-gray-400 font-medium mb-1 block">Left</label>
+              <input
+                type="time"
+                value={departureTime}
+                onChange={e => setDepartureTime(e.target.value)}
+                className="w-full border border-gray-100 bg-gray-50 rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 focus:bg-white transition"
+              />
+            </div>
+          </div>
+          {arrivalTime && departureTime && (() => {
+            const [ah, am] = arrivalTime.split(':').map(Number)
+            const [dh, dm] = departureTime.split(':').map(Number)
+            const mins = (dh * 60 + dm) - (ah * 60 + am)
+            if (mins <= 0) return null
+            const hrs = (mins / 60).toFixed(1)
+            return (
+              <div className="mt-3 bg-teal-50 text-teal-700 text-sm rounded-2xl px-3 py-2 font-medium">
+                ⏱ {hrs} hours today
+              </div>
+            )
+          })()}
+        </Section>
 
         {/* Vitamin D */}
         <div className="bg-white rounded-3xl shadow-sm shadow-violet-100 p-5">
