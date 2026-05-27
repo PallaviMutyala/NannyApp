@@ -21,3 +21,9 @@ dist/
 .vscode/
 .idea/
 .DS_Store
+
+# Firebase CLI cache and generated files
+.firebase/
+.agents/
+.claude/
+skills-lock.json
