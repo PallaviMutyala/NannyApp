@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { collection, query, limit, getDocs } from 'firebase/firestore'
 import { db } from '../firebase/config'
+import { useNavigate } from 'react-router-dom'
 
 function formatDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
@@ -33,6 +34,7 @@ function napDuration(start, end) {
 
 function DayCard({ date, entries }) {
   const [open, setOpen] = useState(false)
+  const navigate = useNavigate()
 
   const allMilk = entries.flatMap(l => l.milk || [])
   const allSolids = entries.flatMap(l => l.solids || [])
@@ -65,11 +67,11 @@ function DayCard({ date, entries }) {
 
   return (
     <div className="bg-white rounded-3xl shadow-sm shadow-violet-100 overflow-hidden">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-violet-50/50 transition-colors"
-      >
-        <div className="flex-1 min-w-0">
+      <div className="px-5 py-4 flex items-center justify-between">
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="flex-1 min-w-0 text-left"
+        >
           <div className="font-bold text-gray-800">{formatDate(date)}</div>
           <div className="flex flex-wrap gap-1.5 mt-1.5">
             {chips.map(c => (
@@ -78,14 +80,22 @@ function DayCard({ date, entries }) {
               </span>
             ))}
           </div>
-        </div>
-        <div className="flex items-center gap-2 ml-3">
+        </button>
+        <div className="flex items-center gap-2 ml-3 flex-shrink-0">
           {allPhotos[0] && (
             <img src={allPhotos[0]} alt="" className="w-10 h-10 rounded-xl object-cover" />
           )}
-          <span className="text-violet-300 text-sm">{open ? '▲' : '▼'}</span>
+          <button
+            onClick={() => navigate(`/log/${date}`)}
+            className="text-xs font-semibold text-violet-500 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded-xl transition-colors"
+          >
+            Edit
+          </button>
+          <button onClick={() => setOpen(o => !o)} className="text-violet-300 text-sm px-1">
+            {open ? '▲' : '▼'}
+          </button>
         </div>
-      </button>
+      </div>
 
       {open && (
         <div className="border-t border-violet-50 px-5 py-5 space-y-5">

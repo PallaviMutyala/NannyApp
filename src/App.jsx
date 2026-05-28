@@ -27,6 +27,7 @@ export default function App() {
           <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
             <Route index element={<Dashboard />} />
             <Route path="log" element={<DailyLog />} />
+            <Route path="log/:date" element={<DailyLog />} />
             <Route path="history" element={<History />} />
           </Route>
         </Routes>

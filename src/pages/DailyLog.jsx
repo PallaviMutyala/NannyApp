@@ -3,6 +3,7 @@ import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../firebase/config'
 import { useAuth } from '../contexts/AuthContext'
+import { useParams, useNavigate } from 'react-router-dom'
 function isHeicFile(file) {
   return file.type === 'image/heic' || file.type === 'image/heif'
     || /\.(heic|heif)$/i.test(file.name)
@@ -169,9 +170,13 @@ function SaveStatus({ status }) {
 
 export default function DailyLog() {
   const { currentUser, userProfile } = useAuth()
+  const { date: dateParam } = useParams()
+  const navigate = useNavigate()
   const fileInputRef = useRef()
   const today = new Date().toISOString().split('T')[0]
-  const docId = `${currentUser.uid}_${today}`
+  const targetDate = dateParam || today
+  const isEditing = targetDate !== today
+  const docId = `${currentUser.uid}_${targetDate}`
   const [converting, setConverting] = useState(false)
   const docRef = doc(db, 'logs', docId)
 
@@ -226,7 +231,7 @@ export default function DailyLog() {
     setSaveStatus('saving')
     try {
       await setDoc(docRef, {
-        date: today,
+        date: targetDate,
         loggedBy: currentUser.uid,
         loggedByName: userProfile?.name || currentUser.displayName,
         photoUrls: overrides.photoUrls ?? uploadedPhotoUrls,
@@ -245,7 +250,7 @@ export default function DailyLog() {
       console.error(err)
       setSaveStatus('error')
     }
-  }, [arrivalTime, departureTime, uploadedPhotoUrls, vitaminD, milkEntries, solidEntries, napEntries, supplies, otherNotes, currentUser, userProfile, today])
+  }, [arrivalTime, departureTime, uploadedPhotoUrls, vitaminD, milkEntries, solidEntries, napEntries, supplies, otherNotes, currentUser, userProfile, targetDate])
 
   // Debounced auto-save whenever form fields change
   useEffect(() => {
@@ -279,7 +284,7 @@ export default function DailyLog() {
       // Show preview immediately after conversion
       setPendingPreviews(prev => [...prev, prepared.preview])
       try {
-        const storageRef = ref(storage, `logs/${today}/${Date.now()}_${prepared.file.name}`)
+        const storageRef = ref(storage, `logs/${targetDate}/${Date.now()}_${prepared.file.name}`)
         await uploadBytes(storageRef, prepared.file)
         const url = await getDownloadURL(storageRef)
         newUrls.push(url)
@@ -352,9 +357,22 @@ export default function DailyLog() {
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-violet-900">Daily Log</h2>
+          {isEditing && (
+            <button
+              onClick={() => navigate('/history')}
+              className="text-violet-400 text-sm font-medium flex items-center gap-1 mb-1 hover:text-violet-600"
+            >
+              ← Back to History
+            </button>
+          )}
+          <h2 className="text-2xl font-bold text-violet-900">
+            {isEditing ? 'Edit Log' : 'Daily Log'}
+          </h2>
           <p className="text-violet-400 text-sm mt-0.5">
-            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+            {(() => {
+              const [y, m, d] = targetDate.split('-').map(Number)
+              return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+            })()}
           </p>
         </div>
         <div className="mt-1">
