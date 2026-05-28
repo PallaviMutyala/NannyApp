@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { collection, query, limit, getDocs } from 'firebase/firestore'
+import { collection, query, limit, orderBy, where, getDocs } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 
 function formatDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
@@ -212,15 +213,21 @@ function DayCard({ date, entries }) {
 export default function History() {
   const [grouped, setGrouped] = useState({})
   const [loading, setLoading] = useState(true)
+  const { userProfile } = useAuth()
 
   useEffect(() => {
+    if (!userProfile?.familyId) return
     async function fetchHistory() {
-      const q = query(collection(db, 'logs'), limit(60))
+      const q = query(
+        collection(db, 'logs'),
+        where('familyId', '==', userProfile.familyId),
+        orderBy('date', 'desc'),
+        limit(60)
+      )
       const snap = await getDocs(q)
       const byDate = {}
       snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))
         .forEach(data => {
           if (!byDate[data.date]) byDate[data.date] = []
           byDate[data.date].push(data)
@@ -229,7 +236,7 @@ export default function History() {
       setLoading(false)
     }
     fetchHistory()
-  }, [])
+  }, [userProfile?.familyId])
 
   const dates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
 

@@ -232,6 +232,7 @@ export default function DailyLog() {
     try {
       await setDoc(docRef, {
         date: targetDate,
+        familyId: userProfile.familyId,
         loggedBy: currentUser.uid,
         loggedByName: userProfile?.name || currentUser.displayName,
         photoUrls: overrides.photoUrls ?? uploadedPhotoUrls,

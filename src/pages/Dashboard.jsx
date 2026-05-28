@@ -110,12 +110,16 @@ export default function Dashboard() {
   const [weekLogs, setWeekLogs] = useState([])
   const navigate = useNavigate()
   const isFriday = new Date().getDay() === 5
+  const { userProfile, familyData } = useAuth()
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
+    if (!userProfile?.familyId) return
+    const { familyId } = userProfile
     const monday = getMondayOfWeek(new Date())
 
     const unsubToday = onSnapshot(
-      query(collection(db, 'logs'), where('date', '==', today)),
+      query(collection(db, 'logs'), where('familyId', '==', familyId), where('date', '==', today)),
       snap => {
         setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
         setLoading(false)
@@ -123,14 +127,14 @@ export default function Dashboard() {
     )
 
     const unsubWeek = onSnapshot(
-      query(collection(db, 'logs'), where('date', '>=', monday), where('date', '<=', today)),
+      query(collection(db, 'logs'), where('familyId', '==', familyId), where('date', '>=', monday), where('date', '<=', today)),
       snap => {
         setWeekLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
       }
     )
 
     return () => { unsubToday(); unsubWeek() }
-  }, [today])
+  }, [today, userProfile?.familyId])
 
   const allMilk = logs.flatMap(l => l.milk || [])
   const allSolids = logs.flatMap(l => l.solids || [])
@@ -167,6 +171,28 @@ export default function Dashboard() {
           + Add log
         </button>
       </div>
+
+      {/* Invite code card — parents only */}
+      {userProfile?.role === 'parent' && familyData?.inviteCode && (
+        <div className="bg-white rounded-3xl shadow-sm shadow-violet-100 p-5">
+          <h4 className="font-bold text-gray-800 flex items-center gap-3 mb-3">
+            <span className="w-8 h-8 bg-violet-100 rounded-xl flex items-center justify-center text-base flex-shrink-0">🔗</span>
+            Family Invite Code
+          </h4>
+          <div className="flex items-center gap-3">
+            <div className="bg-violet-50 text-violet-900 font-mono font-bold text-2xl tracking-[0.3em] px-4 py-3 rounded-2xl flex-1 text-center">
+              {familyData.inviteCode}
+            </div>
+            <button
+              onClick={() => { navigator.clipboard.writeText(familyData.inviteCode); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
+              className="bg-violet-600 text-white text-sm font-bold px-4 py-3 rounded-2xl hover:bg-violet-700 transition-colors"
+            >
+              {copied ? '✓ Copied' : 'Copy'}
+            </button>
+          </div>
+          <p className="text-xs text-gray-400 mt-2">Share this code with your nanny so they can join your family</p>
+        </div>
+      )}
 
       {logs.length === 0 ? (
         <div className="bg-white rounded-3xl shadow-sm shadow-violet-100 p-10 text-center">

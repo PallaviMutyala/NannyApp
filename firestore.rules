@@ -2,18 +2,39 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // User profiles — anyone logged in can read; only you can write your own
+    // Helper: get the requesting user's familyId
+    function myFamilyId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.familyId;
+    }
+
+    // User profiles
     match /users/{userId} {
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Daily logs — anyone logged in can read all logs (parent views nanny's entries)
-    // Only the person who created a log can write/update it
-    match /logs/{logId} {
+    // Families — any authenticated user can read (needed for invite-code lookup at signup)
+    // Only family members can update; anyone authenticated can create (signup flow)
+    match /families/{familyId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null
-                   && request.resource.data.loggedBy == request.auth.uid;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && myFamilyId() == familyId;
+    }
+
+    // Logs — scoped to family
+    // Read: must belong to your family (or be your own log without a familyId — migration window)
+    // Write: must be your own log and tagged with your familyId
+    match /logs/{logId} {
+      allow read: if request.auth != null && (
+        resource.data.loggedBy == request.auth.uid ||
+        ('familyId' in resource.data && resource.data.familyId == myFamilyId())
+      );
+      allow create: if request.auth != null
+        && request.resource.data.loggedBy == request.auth.uid
+        && request.resource.data.familyId == myFamilyId();
+      allow update: if request.auth != null
+        && resource.data.loggedBy == request.auth.uid
+        && request.resource.data.familyId == resource.data.familyId;
     }
   }
 }

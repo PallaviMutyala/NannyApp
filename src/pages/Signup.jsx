@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 export default function Signup() {
   const { signup } = useAuth()
   const navigate = useNavigate()
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'nanny' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'parent', inviteCode: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -17,9 +17,10 @@ export default function Signup() {
     e.preventDefault()
     setError('')
     if (form.password.length < 6) return setError('Password must be at least 6 characters.')
+    if (form.role === 'nanny' && !form.inviteCode.trim()) return setError('Enter the invite code from your family.')
     setLoading(true)
     try {
-      await signup(form.email, form.password, form.name, form.role)
+      await signup(form.email, form.password, form.name, form.role, form.role === 'nanny' ? form.inviteCode : null)
       navigate('/')
     } catch (err) {
       setError(err.message || 'Failed to create account.')
@@ -29,8 +30,8 @@ export default function Signup() {
   }
 
   const roles = [
-    { value: 'nanny', emoji: '👩', label: 'Nanny', desc: 'I log daily care' },
     { value: 'parent', emoji: '👨‍👩‍👧', label: 'Parent', desc: 'I view the logs' },
+    { value: 'nanny', emoji: '👩', label: 'Nanny', desc: 'I log daily care' },
   ]
 
   return (
@@ -54,6 +55,46 @@ export default function Signup() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-600 mb-2">I am a…</label>
+              <div className="flex gap-3">
+                {roles.map(r => (
+                  <button
+                    key={r.value}
+                    type="button"
+                    onClick={() => update('role', r.value)}
+                    className={`flex-1 py-3 px-3 rounded-2xl text-left transition-all border-2 ${
+                      form.role === r.value
+                        ? 'border-violet-500 bg-violet-50'
+                        : 'border-gray-100 bg-gray-50 hover:border-gray-200'
+                    }`}
+                  >
+                    <div className="text-xl mb-0.5">{r.emoji}</div>
+                    <div className={`text-sm font-bold ${form.role === r.value ? 'text-violet-700' : 'text-gray-600'}`}>
+                      {r.label}
+                    </div>
+                    <div className="text-xs text-gray-400">{r.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {form.role === 'nanny' && (
+              <div>
+                <label className="block text-sm font-semibold text-gray-600 mb-1.5">Family Invite Code</label>
+                <input
+                  type="text"
+                  value={form.inviteCode}
+                  onChange={e => update('inviteCode', e.target.value.toUpperCase())}
+                  maxLength={6}
+                  required
+                  className="w-full border border-gray-200 rounded-2xl px-4 py-3 text-sm font-mono tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition"
+                  placeholder="e.g. K7X2P3"
+                />
+                <p className="text-xs text-gray-400 mt-1">Ask the family for their 6-letter code</p>
+              </div>
+            )}
+
             <div>
               <label className="block text-sm font-semibold text-gray-600 mb-1.5">Name</label>
               <input
@@ -87,29 +128,7 @@ export default function Signup() {
                 placeholder="At least 6 characters"
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-600 mb-2">I am a…</label>
-              <div className="flex gap-3">
-                {roles.map(r => (
-                  <button
-                    key={r.value}
-                    type="button"
-                    onClick={() => update('role', r.value)}
-                    className={`flex-1 py-3 px-3 rounded-2xl text-left transition-all border-2 ${
-                      form.role === r.value
-                        ? 'border-violet-500 bg-violet-50'
-                        : 'border-gray-100 bg-gray-50 hover:border-gray-200'
-                    }`}
-                  >
-                    <div className="text-xl mb-0.5">{r.emoji}</div>
-                    <div className={`text-sm font-bold ${form.role === r.value ? 'text-violet-700' : 'text-gray-600'}`}>
-                      {r.label}
-                    </div>
-                    <div className="text-xs text-gray-400">{r.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
+
             <button
               type="submit"
               disabled={loading}
