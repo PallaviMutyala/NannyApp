@@ -31,6 +31,15 @@ async function lookupFamilyByCode(code) {
   return { id: snap.docs[0].id, ...snap.docs[0].data() }
 }
 
+async function backfillLogFamilyId(uid, familyId) {
+  const logsSnap = await getDocs(query(collection(db, 'logs'), where('loggedBy', '==', uid)))
+  const unmigrated = logsSnap.docs.filter(d => !d.data().familyId)
+  if (unmigrated.length === 0) return
+  const batch = writeBatch(db)
+  unmigrated.forEach(d => batch.update(d.ref, { familyId }))
+  await batch.commit()
+}
+
 async function migrateToFamily(uid, profile) {
   const familyRef = doc(collection(db, 'families'))
   await setDoc(familyRef, {
@@ -39,14 +48,7 @@ async function migrateToFamily(uid, profile) {
     createdAt: serverTimestamp(),
   })
   await updateDoc(doc(db, 'users', uid), { familyId: familyRef.id })
-
-  const logsSnap = await getDocs(query(collection(db, 'logs'), where('loggedBy', '==', uid)))
-  if (logsSnap.docs.length > 0) {
-    const batch = writeBatch(db)
-    logsSnap.docs.forEach(d => batch.update(d.ref, { familyId: familyRef.id }))
-    await batch.commit()
-  }
-
+  await backfillLogFamilyId(uid, familyRef.id)
   return { ...profile, familyId: familyRef.id }
 }
 
@@ -99,6 +101,8 @@ export function AuthProvider({ children }) {
 
         if (profile && !profile.familyId) {
           profile = await migrateToFamily(user.uid, profile)
+        } else if (profile?.familyId) {
+          await backfillLogFamilyId(user.uid, profile.familyId)
         }
 
         setUserProfile(profile)

@@ -34,7 +34,10 @@ service cloud.firestore {
         && request.resource.data.familyId == myFamilyId();
       allow update: if request.auth != null
         && resource.data.loggedBy == request.auth.uid
-        && request.resource.data.familyId == resource.data.familyId;
+        && (
+          !('familyId' in resource.data) ||
+          request.resource.data.familyId == resource.data.familyId
+        );
     }
   }
 }
