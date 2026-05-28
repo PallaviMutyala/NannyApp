@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "nannymommy-97ef0"
-  }
+  },
+  "targets": {
+    "nannymommy-97ef0": {
+      "storage": {
+        "default": [
+          "nannymommy-97ef0.firebasestorage.app"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
