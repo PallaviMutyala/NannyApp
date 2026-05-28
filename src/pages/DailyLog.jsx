@@ -121,30 +121,52 @@ function TimeAmountRow({ time, amount, amountUnit, onTimeChange, onAmountChange,
   )
 }
 
+function napMinutes(start, end) {
+  if (!start || !end) return null
+  const [sh, sm] = start.split(':').map(Number)
+  const [eh, em] = end.split(':').map(Number)
+  const mins = (eh * 60 + em) - (sh * 60 + sm)
+  return mins > 0 ? mins : null
+}
+
 function NapRow({ start, end, onStartChange, onEndChange, onRemove }) {
+  const mins = napMinutes(start, end)
+  const tooShort = mins !== null && mins < 30
+
   return (
-    <div className="flex items-end gap-2 mb-2">
-      <div className="flex-1">
-        <label className="text-xs text-gray-400 font-medium mb-1 block">Start</label>
-        <input
-          type="time"
-          value={start}
-          onChange={e => onStartChange(e.target.value)}
-          className="w-full border border-gray-100 bg-gray-50 rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 focus:bg-white transition"
-        />
+    <div className="mb-3">
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <label className="text-xs text-gray-400 font-medium mb-1 block">Start</label>
+          <input
+            type="time"
+            value={start}
+            onChange={e => onStartChange(e.target.value)}
+            className="w-full border border-gray-100 bg-gray-50 rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 focus:bg-white transition"
+          />
+        </div>
+        <div className="flex-1">
+          <label className="text-xs text-gray-400 font-medium mb-1 block">End</label>
+          <input
+            type="time"
+            value={end}
+            onChange={e => onEndChange(e.target.value)}
+            className={`w-full border rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 transition ${
+              tooShort
+                ? 'border-rose-300 bg-rose-50 focus:ring-rose-300'
+                : 'border-gray-100 bg-gray-50 focus:ring-violet-300 focus:bg-white'
+            }`}
+          />
+        </div>
+        <button type="button" onClick={onRemove} className="text-gray-300 hover:text-rose-400 text-xl pb-2.5">
+          ×
+        </button>
       </div>
-      <div className="flex-1">
-        <label className="text-xs text-gray-400 font-medium mb-1 block">End</label>
-        <input
-          type="time"
-          value={end}
-          onChange={e => onEndChange(e.target.value)}
-          className="w-full border border-gray-100 bg-gray-50 rounded-2xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 focus:bg-white transition"
-        />
-      </div>
-      <button type="button" onClick={onRemove} className="text-gray-300 hover:text-rose-400 text-xl pb-2.5">
-        ×
-      </button>
+      {tooShort && (
+        <p className="text-xs text-rose-500 font-medium mt-1.5 ml-1">
+          Minimum 30 minutes — this nap won't be saved
+        </p>
+      )}
     </div>
   )
 }
@@ -241,7 +263,7 @@ export default function DailyLog() {
         vitaminD: overrides.vitaminD ?? vitaminD,
         milk: (overrides.milkEntries ?? milkEntries).filter(e => e.time || e.amount),
         solids: (overrides.solidEntries ?? solidEntries).filter(e => e.time || e.amount || e.food),
-        naps: (overrides.napEntries ?? napEntries).filter(e => e.start || e.end),
+        naps: (overrides.napEntries ?? napEntries).filter(e => (napMinutes(e.start, e.end) ?? 0) >= 30),
         supplies: overrides.supplies ?? supplies,
         otherNotes: overrides.otherNotes ?? otherNotes,
         updatedAt: serverTimestamp(),
