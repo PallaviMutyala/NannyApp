@@ -261,7 +261,7 @@ export default function Dashboard() {
                                 ? isFriday ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-700'
                                 : isFriday ? 'bg-white/10 text-white/40' : 'bg-gray-50 text-gray-300'
                         }`}>
-                          {isUnloggedHoliday ? '🏛️' : hrs > 0 ? `${hrs.toFixed(1)}h` : isPast ? '—' : '·'}
+                          {isUnloggedHoliday ? '🏛️' : hrs > 0 ? `${Math.round(hrs)}h` : isPast ? '—' : '·'}
                         </div>
                       </div>
                     )

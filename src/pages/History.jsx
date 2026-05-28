@@ -53,7 +53,7 @@ function DayCard({ date, entries }) {
         const [ah, am] = arrival.split(':').map(Number)
         const [dh, dm] = departure.split(':').map(Number)
         const mins = (dh * 60 + dm) - (ah * 60 + am)
-        const hrs = mins > 0 ? (mins / 60).toFixed(1) : null
+        const hrs = mins > 0 ? Math.round(mins / 60) : null
         return hrs ? { label: `${hrs}h`, emoji: '🕐', color: 'bg-teal-50 text-teal-600' } : null
       }
       return { label: formatTime(arrival), emoji: '🕐', color: 'bg-teal-50 text-teal-600' }
