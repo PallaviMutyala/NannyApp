@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
-import { collection, query, where, onSnapshot } from 'firebase/firestore'
+import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import DayCard, { downloadMedia } from '../components/DayCard'
+import { localDateStr, parseLocalDate } from '../utils/date'
 
 function getMondayOfWeek(date) {
   const d = new Date(date)
   const day = d.getDay()
   const diff = day === 0 ? -6 : 1 - day
   d.setDate(d.getDate() + diff)
-  return d.toISOString().split('T')[0]
+  return localDateStr(d)
 }
 
 function hoursWorked(arrival, departure) {
@@ -104,43 +106,47 @@ function Card({ emoji, emojiColor = 'bg-violet-100', title, children, empty }) {
 }
 
 export default function Dashboard() {
-  const today = new Date().toISOString().split('T')[0]
-  const [logs, setLogs] = useState([])
+  const today = localDateStr()
+  const [allLogs, setAllLogs] = useState([])
   const [loading, setLoading] = useState(true)
-  const [weekLogs, setWeekLogs] = useState([])
   const navigate = useNavigate()
   const isFriday = new Date().getDay() === 5
   const { userProfile, familyData } = useAuth()
-  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     if (!userProfile?.familyId) return
-    const { familyId } = userProfile
-    const monday = getMondayOfWeek(new Date())
-
-    const unsubToday = onSnapshot(
-      query(collection(db, 'logs'), where('familyId', '==', familyId), where('date', '==', today)),
+    const unsub = onSnapshot(
+      query(
+        collection(db, 'logs'),
+        where('familyId', '==', userProfile.familyId),
+        orderBy('date', 'desc'),
+        limit(90)
+      ),
       snap => {
-        setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+        setAllLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
         setLoading(false)
-      }
+      },
+      err => { console.error('Logs listener error:', err); setLoading(false) }
     )
+    return unsub
+  }, [userProfile?.familyId])
 
-    const unsubWeek = onSnapshot(
-      query(collection(db, 'logs'), where('familyId', '==', familyId), where('date', '>=', monday), where('date', '<=', today)),
-      snap => {
-        setWeekLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-      }
-    )
+  const monday = getMondayOfWeek(new Date())
+  const logs = allLogs.filter(l => l.date === today)
+  const weekLogs = allLogs.filter(l => l.date >= monday && l.date <= today)
 
-    return () => { unsubToday(); unsubWeek() }
-  }, [today, userProfile?.familyId])
+  const pastByDate = {}
+  allLogs.filter(l => l.date < today).forEach(l => {
+    (pastByDate[l.date] ||= []).push(l)
+  })
+  const pastDates = Object.keys(pastByDate).sort((a, b) => b.localeCompare(a))
 
   const allMilk = logs.flatMap(l => l.milk || [])
   const allSolids = logs.flatMap(l => l.solids || [])
   const allNaps = logs.flatMap(l => l.naps || [])
   const allSupplies = [...new Set(logs.flatMap(l => l.supplies || []))]
   const allPhotos = logs.flatMap(l => l.photoUrls || [])
+  const allVideos = logs.flatMap(l => l.videoUrls || [])
   const vitaminDGiven = logs.some(l => l.vitaminD)
   const notes = logs.map(l => l.otherNotes).filter(Boolean)
   const totalMilkOz = allMilk.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0)
@@ -157,42 +163,22 @@ export default function Dashboard() {
   return (
     <div className="py-6 space-y-4">
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold text-violet-900">Today</h2>
           <p className="text-violet-400 text-sm mt-0.5">
             {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
           </p>
         </div>
-        <button
-          onClick={() => navigate('/log')}
-          className="bg-gradient-to-r from-violet-600 to-rose-500 text-white text-sm font-bold px-4 py-2.5 rounded-2xl shadow-md shadow-violet-200 hover:opacity-90 transition-opacity"
-        >
-          + Add log
-        </button>
+        {logs.length > 0 && (
+          <button
+            onClick={() => navigate('/log')}
+            className="bg-gradient-to-r from-violet-600 to-rose-500 text-white text-sm font-bold px-4 py-2.5 rounded-2xl shadow-md shadow-violet-200 hover:opacity-90 transition-opacity whitespace-nowrap flex-shrink-0"
+          >
+            ✏️ Edit today's log
+          </button>
+        )}
       </div>
-
-      {/* Invite code card — parents only */}
-      {userProfile?.role === 'parent' && familyData?.inviteCode && (
-        <div className="bg-white rounded-3xl shadow-sm shadow-violet-100 p-5">
-          <h4 className="font-bold text-gray-800 flex items-center gap-3 mb-3">
-            <span className="w-8 h-8 bg-violet-100 rounded-xl flex items-center justify-center text-base flex-shrink-0">🔗</span>
-            Family Invite Code
-          </h4>
-          <div className="flex items-center gap-3">
-            <div className="bg-violet-50 text-violet-900 font-mono font-bold text-2xl tracking-[0.3em] px-4 py-3 rounded-2xl flex-1 text-center">
-              {familyData.inviteCode}
-            </div>
-            <button
-              onClick={() => { navigator.clipboard.writeText(familyData.inviteCode); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
-              className="bg-violet-600 text-white text-sm font-bold px-4 py-3 rounded-2xl hover:bg-violet-700 transition-colors"
-            >
-              {copied ? '✓ Copied' : 'Copy'}
-            </button>
-          </div>
-          <p className="text-xs text-gray-400 mt-2">Share this code with your nanny so they can join your family</p>
-        </div>
-      )}
 
       {logs.length === 0 ? (
         <div className="bg-white rounded-3xl shadow-sm shadow-violet-100 p-10 text-center">
@@ -232,13 +218,13 @@ export default function Dashboard() {
           {weekLogs.length > 0 && (() => {
             const monday = getMondayOfWeek(new Date())
             const weekDays = Array.from({ length: 5 }, (_, i) => {
-              const d = new Date(monday)
+              const d = parseLocalDate(monday)
               d.setDate(d.getDate() + i)
-              return d.toISOString().split('T')[0]
+              return localDateStr(d)
             })
-            const mondayYear = new Date(monday).getFullYear()
+            const mondayYear = parseLocalDate(monday).getFullYear()
             const holidays = getFederalHolidays(mondayYear)
-            const fridayYear = new Date(weekDays[4]).getFullYear()
+            const fridayYear = parseLocalDate(weekDays[4]).getFullYear()
             if (fridayYear !== mondayYear) getFederalHolidays(fridayYear).forEach((name, date) => holidays.set(date, name))
 
             const loggedByDate = {}
@@ -251,6 +237,10 @@ export default function Dashboard() {
               return sum + logged + (holidays.has(date) && logged === 0 ? 8 : 0)
             }, 0)
             const weekHolidays = weekDays.filter(d => holidays.has(d)).map(d => holidays.get(d))
+            const isParent = userProfile?.role === 'parent'
+            const totalMins = Math.round(totalHours * 60)
+            const billedHours = Math.floor(totalMins / 60) + (totalMins % 60 >= 30 ? 1 : 0)
+            const weeklyPay = billedHours * (familyData?.hourlyRate ?? 30)
 
             return (
               <div className={`rounded-3xl p-5 ${isFriday ? 'bg-gradient-to-r from-violet-600 to-rose-500 text-white shadow-lg shadow-violet-200' : 'bg-white shadow-sm shadow-violet-100'}`}>
@@ -261,9 +251,16 @@ export default function Dashboard() {
                       {isFriday ? 'Weekly Summary 🎉' : 'This Week'}
                     </span>
                   </div>
-                  <span className={`font-bold text-lg ${isFriday ? 'text-white' : 'text-teal-700'}`}>
-                    {formatHours(totalHours)} total
-                  </span>
+                  <div className="text-right">
+                    <div className={`font-bold text-lg leading-tight ${isFriday ? 'text-white' : 'text-teal-700'}`}>
+                      {formatHours(totalHours)} total
+                    </div>
+                    {isParent && (
+                      <div className={`text-sm font-semibold ${isFriday ? 'text-white/80' : 'text-emerald-600'}`}>
+                        ${weeklyPay.toLocaleString()}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="flex gap-1">
                   {weekDays.map((date, i) => {
@@ -333,21 +330,43 @@ export default function Dashboard() {
             )
           })()}
 
-          {/* Photo feed */}
-          {allPhotos.length > 0 && (
+          {/* Photo & video feed */}
+          {(allPhotos.length > 0 || allVideos.length > 0) && (
             <div className="space-y-3">
               {allPhotos.map((url, i) => (
-                <div key={i} className="bg-white rounded-3xl overflow-hidden shadow-sm shadow-violet-100">
-                  <img
-                    src={url}
-                    alt=""
-                    className="w-full object-cover"
-                    style={{ maxHeight: '70vh' }}
-                  />
+                <div key={`photo-${i}`} className="bg-white rounded-3xl overflow-hidden shadow-sm shadow-violet-100">
+                  <div className="relative">
+                    <img src={url} alt="" className="w-full object-cover" style={{ maxHeight: '70vh' }} />
+                    <button
+                      onClick={() => downloadMedia(url, `nannylog-${today}-photo-${i + 1}.jpg`)}
+                      className="absolute top-2 right-2 bg-black/55 text-white text-xs font-semibold px-3 py-1.5 rounded-full backdrop-blur-sm hover:bg-black/70"
+                    >
+                      ⬇ Download
+                    </button>
+                  </div>
                   <div className="px-4 py-3 flex items-center gap-2">
                     <span className="text-pink-400 text-lg">📷</span>
                     <span className="text-xs text-gray-400">
                       Photo {allPhotos.length > 1 ? `${i + 1} of ${allPhotos.length}` : 'today'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {allVideos.map((url, i) => (
+                <div key={`video-${i}`} className="bg-white rounded-3xl overflow-hidden shadow-sm shadow-violet-100">
+                  <div className="relative">
+                    <video src={url} controls className="w-full" style={{ maxHeight: '70vh' }} />
+                    <button
+                      onClick={() => downloadMedia(url, `nannylog-${today}-video-${i + 1}.mp4`)}
+                      className="absolute top-2 right-2 bg-black/55 text-white text-xs font-semibold px-3 py-1.5 rounded-full backdrop-blur-sm hover:bg-black/70"
+                    >
+                      ⬇ Download
+                    </button>
+                  </div>
+                  <div className="px-4 py-3 flex items-center gap-2">
+                    <span className="text-pink-400 text-lg">🎥</span>
+                    <span className="text-xs text-gray-400">
+                      Video {allVideos.length > 1 ? `${i + 1} of ${allVideos.length}` : 'today'}
                     </span>
                   </div>
                 </div>
@@ -423,10 +442,24 @@ export default function Dashboard() {
             </Card>
           )}
 
-          <p className="text-center text-xs text-violet-300 pb-2">
-            {logs.length} log entr{logs.length === 1 ? 'y' : 'ies'} today
-          </p>
+          {logs[0]?.loggedByName && (
+            <p className="text-center text-xs text-violet-300 pb-2">
+              Last updated by {logs[0].loggedByName}
+            </p>
+          )}
         </>
+      )}
+
+      {/* Past days — collapsed */}
+      {pastDates.length > 0 && (
+        <div className="pt-4">
+          <h3 className="text-lg font-bold text-violet-900 mb-3 px-1">Past days</h3>
+          <div className="space-y-3">
+            {pastDates.map(date => (
+              <DayCard key={date} date={date} entries={pastByDate[date]} />
+            ))}
+          </div>
+        </div>
       )}
     </div>
   )

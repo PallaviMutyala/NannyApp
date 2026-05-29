@@ -4,6 +4,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../firebase/config'
 import { useAuth } from '../contexts/AuthContext'
 import { useParams, useNavigate } from 'react-router-dom'
+import { localDateStr } from '../utils/date'
 function isHeicFile(file) {
   return file.type === 'image/heic' || file.type === 'image/heif'
     || /\.(heic|heif)$/i.test(file.name)
@@ -174,19 +175,22 @@ function NapRow({ start, end, onStartChange, onEndChange, onRemove }) {
 function SaveStatus({ status }) {
   if (status === 'idle') return null
   const styles = {
-    saving: 'bg-violet-100 text-violet-500',
-    saved:  'bg-emerald-100 text-emerald-600',
-    error:  'bg-rose-100 text-rose-500',
+    saving: 'bg-violet-600 text-white',
+    saved:  'bg-emerald-500 text-white',
+    error:  'bg-rose-500 text-white',
   }
   const labels = {
     saving: '● Saving…',
     saved:  '✓ Saved',
     error:  '⚠ Error saving',
   }
+  // Floating toast above the bottom nav — stays visible while scrolling
   return (
-    <span className={`text-xs font-semibold px-3 py-1 rounded-full transition-all ${styles[status]}`}>
-      {labels[status]}
-    </span>
+    <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+      <span className={`text-sm font-semibold px-4 py-2 rounded-full shadow-lg transition-all ${styles[status]}`}>
+        {labels[status]}
+      </span>
+    </div>
   )
 }
 
@@ -195,26 +199,30 @@ export default function DailyLog() {
   const { date: dateParam } = useParams()
   const navigate = useNavigate()
   const fileInputRef = useRef()
-  const today = new Date().toISOString().split('T')[0]
+  const today = localDateStr()
   const targetDate = dateParam || today
   const isEditing = targetDate !== today
-  const docId = `${currentUser.uid}_${targetDate}`
+  const familyId = userProfile?.familyId
+  const docId = familyId ? `${familyId}_${targetDate}` : null
   const [converting, setConverting] = useState(false)
-  const docRef = doc(db, 'logs', docId)
 
   const [loaded, setLoaded] = useState(false)
+  const [loadError, setLoadError] = useState(null)
   const [saveStatus, setSaveStatus] = useState('idle')
   const savedTimerRef = useRef(null)
   const debounceRef = useRef(null)
 
   const [uploadedPhotoUrls, setUploadedPhotoUrls] = useState([])
+  const [uploadedVideoUrls, setUploadedVideoUrls] = useState([])
   const [pendingPhotos, setPendingPhotos] = useState([])
   const [pendingPreviews, setPendingPreviews] = useState([])
+  const [pendingVideoCount, setPendingVideoCount] = useState(0)
   const [uploadingPhotos, setUploadingPhotos] = useState(false)
 
   const [arrivalTime, setArrivalTime] = useState('')
   const [departureTime, setDepartureTime] = useState('')
   const [vitaminD, setVitaminD] = useState(false)
+  const [laundry, setLaundry] = useState(false)
   const [milkEntries, setMilkEntries] = useState([{ time: '', amount: '' }])
   const [solidEntries, setSolidEntries] = useState([{ time: '', amount: '', food: '' }])
   const [napEntries, setNapEntries] = useState([{ start: '', end: '' }])
@@ -222,26 +230,41 @@ export default function DailyLog() {
   const [customSupply, setCustomSupply] = useState('')
   const [otherNotes, setOtherNotes] = useState('')
 
-  // Load today's existing log on mount
+  // Load existing log for this date (doc may not exist yet for a new day)
   useEffect(() => {
+    if (!docId) return
+    let cancelled = false
+    setLoaded(false)
+    setLoadError(null)
+
     async function load() {
-      const snap = await getDoc(docRef)
-      if (snap.exists()) {
-        const d = snap.data()
-        setArrivalTime(d.arrivalTime || '')
-        setDepartureTime(d.departureTime || '')
-        setVitaminD(d.vitaminD || false)
-        setMilkEntries(d.milk?.length ? d.milk : [{ time: '', amount: '' }])
-        setSolidEntries(d.solids?.length ? d.solids : [{ time: '', amount: '', food: '' }])
-        setNapEntries(d.naps?.length ? d.naps : [{ start: '', end: '' }])
-        setSupplies(d.supplies || [])
-        setOtherNotes(d.otherNotes || '')
-        setUploadedPhotoUrls(d.photoUrls || [])
+      try {
+        const snap = await getDoc(doc(db, 'logs', docId))
+        if (cancelled) return
+        if (snap.exists()) {
+          const d = snap.data()
+          setArrivalTime(d.arrivalTime || '')
+          setDepartureTime(d.departureTime || '')
+          setVitaminD(d.vitaminD || false)
+          setLaundry(d.laundry || false)
+          setMilkEntries(d.milk?.length ? d.milk : [{ time: '', amount: '' }])
+          setSolidEntries(d.solids?.length ? d.solids : [{ time: '', amount: '', food: '' }])
+          setNapEntries(d.naps?.length ? d.naps : [{ start: '', end: '' }])
+          setSupplies(d.supplies || [])
+          setOtherNotes(d.otherNotes || '')
+          setUploadedPhotoUrls(d.photoUrls || [])
+          setUploadedVideoUrls(d.videoUrls || [])
+        }
+      } catch (err) {
+        console.error('Failed to load log:', err)
+        if (!cancelled) setLoadError(err.message || 'Could not load this log.')
+      } finally {
+        if (!cancelled) setLoaded(true)
       }
-      setLoaded(true)
     }
     load()
-  }, [])
+    return () => { cancelled = true }
+  }, [docId])
 
   const markSaved = useCallback(() => {
     setSaveStatus('saved')
@@ -250,17 +273,20 @@ export default function DailyLog() {
   }, [])
 
   const saveToFirestore = useCallback(async (overrides = {}) => {
+    if (!docId || !familyId) return
     setSaveStatus('saving')
     try {
-      await setDoc(docRef, {
+      await setDoc(doc(db, 'logs', docId), {
         date: targetDate,
-        familyId: userProfile.familyId,
+        familyId,
         loggedBy: currentUser.uid,
         loggedByName: userProfile?.name || currentUser.displayName,
         photoUrls: overrides.photoUrls ?? uploadedPhotoUrls,
+        videoUrls: overrides.videoUrls ?? uploadedVideoUrls,
         arrivalTime,
         departureTime,
         vitaminD: overrides.vitaminD ?? vitaminD,
+        laundry: overrides.laundry ?? laundry,
         milk: (overrides.milkEntries ?? milkEntries).filter(e => e.time || e.amount),
         solids: (overrides.solidEntries ?? solidEntries).filter(e => e.time || e.amount || e.food),
         naps: (overrides.napEntries ?? napEntries).filter(e => (napMinutes(e.start, e.end) ?? 0) >= 30),
@@ -273,7 +299,7 @@ export default function DailyLog() {
       console.error(err)
       setSaveStatus('error')
     }
-  }, [arrivalTime, departureTime, uploadedPhotoUrls, vitaminD, milkEntries, solidEntries, napEntries, supplies, otherNotes, currentUser, userProfile, targetDate])
+  }, [arrivalTime, departureTime, uploadedPhotoUrls, uploadedVideoUrls, vitaminD, laundry, milkEntries, solidEntries, napEntries, supplies, otherNotes, currentUser, userProfile, targetDate, docId, familyId])
 
   // Debounced auto-save whenever form fields change
   useEffect(() => {
@@ -281,9 +307,9 @@ export default function DailyLog() {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => saveToFirestore(), 1500)
     return () => clearTimeout(debounceRef.current)
-  }, [arrivalTime, departureTime, vitaminD, milkEntries, solidEntries, napEntries, supplies, otherNotes, loaded])
+  }, [arrivalTime, departureTime, vitaminD, laundry, milkEntries, solidEntries, napEntries, supplies, otherNotes, loaded])
 
-  async function handlePhotoSelect(e) {
+  async function handleMediaSelect(e) {
     const files = Array.from(e.target.files)
     if (!files.length) return
     e.target.value = ''
@@ -291,39 +317,57 @@ export default function DailyLog() {
     setUploadingPhotos(true)
     setSaveStatus('saving')
 
-    const newUrls = []
+    const newPhotoUrls = []
+    const newVideoUrls = []
+
     for (const file of files) {
-      let prepared
-      try {
-        if (isHeicFile(file)) setConverting(true)
-        await new Promise(resolve => setTimeout(resolve, 60)) // let overlay render
-        prepared = await preparePhoto(file)
-      } catch (err) {
-        alert(`Could not process photo: ${err.message}`)
-        continue
-      } finally {
-        setConverting(false)
-      }
-      // Show preview immediately after conversion
-      setPendingPreviews(prev => [...prev, prepared.preview])
-      try {
-        const storageRef = ref(storage, `logs/${targetDate}/${Date.now()}_${prepared.file.name}`)
-        await uploadBytes(storageRef, prepared.file)
-        const url = await getDownloadURL(storageRef)
-        newUrls.push(url)
-        setPendingPreviews(prev => prev.filter(p => p !== prepared.preview))
-      } catch (err) {
-        console.error(err)
-        setPendingPreviews(prev => prev.filter(p => p !== prepared.preview))
-        setSaveStatus('error')
+      if (file.type.startsWith('video/')) {
+        setPendingVideoCount(n => n + 1)
+        try {
+          const storageRef = ref(storage, `logs/${targetDate}/${Date.now()}_${file.name}`)
+          await uploadBytes(storageRef, file)
+          const url = await getDownloadURL(storageRef)
+          newVideoUrls.push(url)
+        } catch (err) {
+          console.error(err)
+          setSaveStatus('error')
+        } finally {
+          setPendingVideoCount(n => n - 1)
+        }
+      } else {
+        let prepared
+        try {
+          if (isHeicFile(file)) setConverting(true)
+          await new Promise(resolve => setTimeout(resolve, 60))
+          prepared = await preparePhoto(file)
+        } catch (err) {
+          alert(`Could not process photo: ${err.message}`)
+          continue
+        } finally {
+          setConverting(false)
+        }
+        setPendingPreviews(prev => [...prev, prepared.preview])
+        try {
+          const storageRef = ref(storage, `logs/${targetDate}/${Date.now()}_${prepared.file.name}`)
+          await uploadBytes(storageRef, prepared.file)
+          const url = await getDownloadURL(storageRef)
+          newPhotoUrls.push(url)
+          setPendingPreviews(prev => prev.filter(p => p !== prepared.preview))
+        } catch (err) {
+          console.error(err)
+          setPendingPreviews(prev => prev.filter(p => p !== prepared.preview))
+          setSaveStatus('error')
+        }
       }
     }
 
-    if (newUrls.length > 0) {
+    if (newPhotoUrls.length > 0 || newVideoUrls.length > 0) {
       if (debounceRef.current) clearTimeout(debounceRef.current)
-      const combined = [...uploadedPhotoUrls, ...newUrls]
-      setUploadedPhotoUrls(combined)
-      await saveToFirestore({ photoUrls: combined })
+      const combinedPhotos = [...uploadedPhotoUrls, ...newPhotoUrls]
+      const combinedVideos = [...uploadedVideoUrls, ...newVideoUrls]
+      setUploadedPhotoUrls(combinedPhotos)
+      setUploadedVideoUrls(combinedVideos)
+      await saveToFirestore({ photoUrls: combinedPhotos, videoUrls: combinedVideos })
     }
     setUploadingPhotos(false)
   }
@@ -333,6 +377,13 @@ export default function DailyLog() {
     setUploadedPhotoUrls(updated)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     saveToFirestore({ photoUrls: updated })
+  }
+
+  function removeUploadedVideo(i) {
+    const updated = uploadedVideoUrls.filter((_, idx) => idx !== i)
+    setUploadedVideoUrls(updated)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    saveToFirestore({ videoUrls: updated })
   }
 
   const updateMilk  = (i, f, v) => setMilkEntries(prev => prev.map((e, idx) => idx === i ? { ...e, [f]: v } : e))
@@ -349,11 +400,35 @@ export default function DailyLog() {
     setCustomSupply('')
   }
 
+  if (!familyId) {
+    return (
+      <div className="py-16 text-center text-violet-300">
+        <p className="text-sm">Setting up your family…</p>
+      </div>
+    )
+  }
+
   if (!loaded) {
     return (
       <div className="py-16 text-center text-violet-300">
         <div className="text-5xl mb-3 animate-pulse">📝</div>
         <p className="text-sm">Loading today's log…</p>
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="py-16 text-center px-4">
+        <p className="text-rose-600 font-medium mb-2">Could not load this log</p>
+        <p className="text-sm text-gray-500 mb-4">{loadError}</p>
+        <button
+          type="button"
+          onClick={() => navigate('/')}
+          className="text-violet-600 text-sm font-semibold hover:text-violet-800"
+        >
+          ← Back to dashboard
+        </button>
       </div>
     )
   }
@@ -370,11 +445,6 @@ export default function DailyLog() {
     )
   }
 
-  const allPhotos = [
-    ...uploadedPhotoUrls.map(url => ({ type: 'uploaded', url })),
-    ...pendingPreviews.map(url => ({ type: 'pending', url })),
-  ]
-
   return (
     <div className="py-6">
       {/* Header */}
@@ -382,10 +452,10 @@ export default function DailyLog() {
         <div>
           {isEditing && (
             <button
-              onClick={() => navigate('/history')}
+              onClick={() => navigate('/')}
               className="text-violet-400 text-sm font-medium flex items-center gap-1 mb-1 hover:text-violet-600"
             >
-              ← Back to History
+              ← Back
             </button>
           )}
           <h2 className="text-2xl font-bold text-violet-900">
@@ -398,10 +468,8 @@ export default function DailyLog() {
             })()}
           </p>
         </div>
-        <div className="mt-1">
-          <SaveStatus status={saveStatus} />
-        </div>
       </div>
+      <SaveStatus status={saveStatus} />
 
       <div className="space-y-4">
 
@@ -432,10 +500,16 @@ export default function DailyLog() {
             const [dh, dm] = departureTime.split(':').map(Number)
             const mins = (dh * 60 + dm) - (ah * 60 + am)
             if (mins <= 0) return null
-            const hrs = (mins / 60).toFixed(1)
+            const isParent = userProfile?.role === 'parent'
+            const remMins = mins % 60
+            const label = isParent
+              ? remMins === 0
+                ? `${Math.floor(mins / 60)}h`
+                : `${Math.floor(mins / 60)}h ${remMins}m`
+              : `${Math.round(mins / 60)}h`
             return (
               <div className="mt-3 bg-teal-50 text-teal-700 text-sm rounded-2xl px-3 py-2 font-medium">
-                ⏱ {hrs} hours today
+                ⏱ {label} today
               </div>
             )
           })()}
@@ -467,30 +541,43 @@ export default function DailyLog() {
           )}
         </div>
 
-        {/* Photos */}
-        <Section emoji="📷" emojiColor="bg-pink-100" title="Photos">
+        {/* Photos & Videos */}
+        <Section emoji="📷" emojiColor="bg-pink-100" title="Photos & Videos">
           <div className="flex flex-wrap gap-2">
-            {allPhotos.map((photo, i) => (
-              <div key={i} className="relative">
-                <img
-                  src={photo.url}
-                  alt=""
-                  className={`w-20 h-20 object-cover rounded-2xl ${photo.type === 'pending' ? 'opacity-50' : ''}`}
-                />
-                {photo.type === 'pending' && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-5 h-5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
-                  </div>
-                )}
-                {photo.type === 'uploaded' && (
-                  <button
-                    type="button"
-                    onClick={() => removeUploadedPhoto(i)}
-                    className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center shadow"
-                  >
-                    ×
-                  </button>
-                )}
+            {uploadedPhotoUrls.map((url, i) => (
+              <div key={`photo-${i}`} className="relative">
+                <img src={url} alt="" className="w-20 h-20 object-cover rounded-2xl" />
+                <button
+                  type="button"
+                  onClick={() => removeUploadedPhoto(i)}
+                  className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center shadow"
+                >×</button>
+              </div>
+            ))}
+            {uploadedVideoUrls.map((url, i) => (
+              <div key={`video-${i}`} className="relative">
+                <video src={url} className="w-20 h-20 object-cover rounded-2xl bg-gray-100" />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <span className="text-white text-xl drop-shadow">▶</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeUploadedVideo(i)}
+                  className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center shadow"
+                >×</button>
+              </div>
+            ))}
+            {pendingPreviews.map((url, i) => (
+              <div key={`pending-photo-${i}`} className="relative">
+                <img src={url} alt="" className="w-20 h-20 object-cover rounded-2xl opacity-50" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-5 h-5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                </div>
+              </div>
+            ))}
+            {Array.from({ length: pendingVideoCount }).map((_, i) => (
+              <div key={`pending-video-${i}`} className="w-20 h-20 rounded-2xl bg-gray-100 flex items-center justify-center">
+                <div className="w-5 h-5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
               </div>
             ))}
             <button
@@ -503,7 +590,7 @@ export default function DailyLog() {
               <span className="text-xs mt-0.5">Add</span>
             </button>
           </div>
-          <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoSelect} />
+          <input ref={fileInputRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={handleMediaSelect} />
         </Section>
 
         {/* Milk */}
@@ -631,6 +718,32 @@ export default function DailyLog() {
             </div>
           ))}
         </Section>
+
+        {/* Laundry */}
+        <div className="bg-white rounded-3xl shadow-sm shadow-violet-100 p-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="w-9 h-9 bg-sky-100 rounded-2xl flex items-center justify-center text-lg">🧺</span>
+              <div>
+                <div className="font-bold text-gray-800">Laundry</div>
+                <div className="text-xs text-gray-400">Mark if done today</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLaundry(v => !v)}
+              style={{ width: 52 }}
+              className={`h-7 rounded-full transition-colors relative flex-shrink-0 ${laundry ? 'bg-sky-500' : 'bg-gray-200'}`}
+            >
+              <div className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-md transition-transform ${laundry ? 'translate-x-7' : 'translate-x-1'}`} />
+            </button>
+          </div>
+          {laundry && (
+            <div className="mt-3 bg-sky-50 text-sky-700 text-sm rounded-2xl px-3 py-2 font-medium">
+              ✓ Laundry done today
+            </div>
+          )}
+        </div>
 
         {/* Notes */}
         <Section emoji="📝" emojiColor="bg-emerald-100" title="Notes">

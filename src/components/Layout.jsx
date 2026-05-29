@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { Outlet, NavLink, Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Layout() {
@@ -15,12 +15,16 @@ export default function Layout() {
       {/* Header */}
       <header className="bg-white border-b border-violet-100 sticky top-0 z-10">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <Link
+            to="/"
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+            aria-label="NannyLog home"
+          >
             <div className="bg-violet-600 text-white w-8 h-8 rounded-xl flex items-center justify-center text-base">
               🍼
             </div>
             <span className="font-bold text-violet-900 text-lg tracking-tight">NannyLog</span>
-          </div>
+          </Link>
           <div className="flex items-center gap-3">
             {userProfile && (
               <div className="hidden sm:flex items-center gap-2">
@@ -50,8 +54,7 @@ export default function Layout() {
         <div className="max-w-2xl mx-auto flex">
           {[
             { to: '/', end: true, emoji: '🏠', label: 'Today' },
-            { to: '/log', emoji: '✏️', label: 'Log' },
-            { to: '/history', emoji: '📅', label: 'History' },
+            { to: '/family', emoji: '👨‍👩‍👧', label: 'Family' },
           ].map(({ to, end, emoji, label }) => (
             <NavLink
               key={to}

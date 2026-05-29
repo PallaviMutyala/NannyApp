@@ -1,8 +1,5 @@
-import { useEffect, useState } from 'react'
-import { collection, query, limit, orderBy, where, getDocs } from 'firebase/firestore'
-import { db } from '../firebase/config'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext'
 
 function formatDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
@@ -33,8 +30,25 @@ function napDuration(start, end) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
-function DayCard({ date, entries }) {
-  const [open, setOpen] = useState(false)
+export async function downloadMedia(url, filename) {
+  try {
+    const res = await fetch(url)
+    const blob = await res.blob()
+    const objUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = objUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(objUrl)
+  } catch {
+    window.open(url, '_blank')
+  }
+}
+
+export default function DayCard({ date, entries, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen)
   const navigate = useNavigate()
 
   const allMilk = entries.flatMap(l => l.milk || [])
@@ -42,9 +56,11 @@ function DayCard({ date, entries }) {
   const allNaps = entries.flatMap(l => l.naps || [])
   const allSupplies = [...new Set(entries.flatMap(l => l.supplies || []))]
   const allPhotos = entries.flatMap(l => l.photoUrls || [])
+  const allVideos = entries.flatMap(l => l.videoUrls || [])
   const arrival = entries.find(l => l.arrivalTime)?.arrivalTime
   const departure = entries.find(l => l.departureTime)?.departureTime
   const vitaminDGiven = entries.some(l => l.vitaminD)
+  const laundryDone = entries.some(l => l.laundry)
   const notes = entries.map(l => l.otherNotes).filter(Boolean)
   const totalMilkOz = allMilk.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0)
 
@@ -63,29 +79,27 @@ function DayCard({ date, entries }) {
     allSolids.length > 0 && { label: `${allSolids.length} meal${allSolids.length > 1 ? 's' : ''}`, emoji: '🥣', color: 'bg-orange-50 text-orange-600' },
     allNaps.length > 0 && { label: `${allNaps.length} nap${allNaps.length > 1 ? 's' : ''}`, emoji: '😴', color: 'bg-indigo-50 text-indigo-600' },
     vitaminDGiven && { label: 'Vit D', emoji: '☀️', color: 'bg-yellow-50 text-yellow-600' },
+    laundryDone && { label: 'Laundry', emoji: '🧺', color: 'bg-sky-50 text-sky-600' },
     allSupplies.length > 0 && { label: `${allSupplies.length} needed`, emoji: '⚠️', color: 'bg-rose-50 text-rose-600' },
   ].filter(Boolean)
 
   return (
     <div className="bg-white rounded-3xl shadow-sm shadow-violet-100 overflow-hidden">
       <div className="px-5 py-4 flex items-center justify-between">
-        <button
-          onClick={() => setOpen(o => !o)}
-          className="flex-1 min-w-0 text-left"
-        >
+        <button onClick={() => setOpen(o => !o)} className="flex-1 min-w-0 text-left">
           <div className="font-bold text-gray-800">{formatDate(date)}</div>
           <div className="flex flex-wrap gap-1.5 mt-1.5">
-            {chips.map(c => (
-              <span key={c.label} className={`text-xs font-semibold px-2 py-0.5 rounded-full ${c.color}`}>
-                {c.emoji} {c.label}
-              </span>
-            ))}
+            {chips.length === 0
+              ? <span className="text-xs text-gray-300">No entries</span>
+              : chips.map(c => (
+                <span key={c.label} className={`text-xs font-semibold px-2 py-0.5 rounded-full ${c.color}`}>
+                  {c.emoji} {c.label}
+                </span>
+              ))}
           </div>
         </button>
         <div className="flex items-center gap-2 ml-3 flex-shrink-0">
-          {allPhotos[0] && (
-            <img src={allPhotos[0]} alt="" className="w-10 h-10 rounded-xl object-cover" />
-          )}
+          {allPhotos[0] && <img src={allPhotos[0]} alt="" className="w-10 h-10 rounded-xl object-cover" />}
           <button
             onClick={() => navigate(`/log/${date}`)}
             className="text-xs font-semibold text-violet-500 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded-xl transition-colors"
@@ -106,7 +120,34 @@ function DayCard({ date, entries }) {
               <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Photos</p>
               <div className="space-y-2">
                 {allPhotos.map((url, i) => (
-                  <img key={i} src={url} alt="" className="w-full object-cover rounded-2xl" style={{ maxHeight: '60vh' }} />
+                  <div key={i} className="relative">
+                    <img src={url} alt="" className="w-full object-cover rounded-2xl" style={{ maxHeight: '60vh' }} />
+                    <button
+                      onClick={() => downloadMedia(url, `nannylog-${date}-photo-${i + 1}.jpg`)}
+                      className="absolute top-2 right-2 bg-black/55 text-white text-xs font-semibold px-3 py-1.5 rounded-full backdrop-blur-sm hover:bg-black/70"
+                    >
+                      ⬇ Download
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {allVideos.length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Videos</p>
+              <div className="space-y-2">
+                {allVideos.map((url, i) => (
+                  <div key={i} className="relative">
+                    <video src={url} controls className="w-full rounded-2xl" style={{ maxHeight: '60vh' }} />
+                    <button
+                      onClick={() => downloadMedia(url, `nannylog-${date}-video-${i + 1}.mp4`)}
+                      className="absolute top-2 right-2 bg-black/55 text-white text-xs font-semibold px-3 py-1.5 rounded-full backdrop-blur-sm hover:bg-black/70"
+                    >
+                      ⬇ Download
+                    </button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -134,6 +175,12 @@ function DayCard({ date, entries }) {
           }`}>
             ☀️ Vitamin D: {vitaminDGiven ? 'Given ✓' : 'Not given'}
           </div>
+
+          {laundryDone && (
+            <div className="text-sm rounded-2xl px-4 py-3 font-medium bg-sky-50 text-sky-700">
+              🧺 Laundry done ✓
+            </div>
+          )}
 
           {allMilk.length > 0 && (
             <div>
@@ -204,67 +251,6 @@ function DayCard({ date, entries }) {
               ))}
             </div>
           )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-export default function History() {
-  const [grouped, setGrouped] = useState({})
-  const [loading, setLoading] = useState(true)
-  const { userProfile } = useAuth()
-
-  useEffect(() => {
-    if (!userProfile?.familyId) return
-    async function fetchHistory() {
-      const q = query(
-        collection(db, 'logs'),
-        where('familyId', '==', userProfile.familyId),
-        orderBy('date', 'desc'),
-        limit(60)
-      )
-      const snap = await getDocs(q)
-      const byDate = {}
-      snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .forEach(data => {
-          if (!byDate[data.date]) byDate[data.date] = []
-          byDate[data.date].push(data)
-        })
-      setGrouped(byDate)
-      setLoading(false)
-    }
-    fetchHistory()
-  }, [userProfile?.familyId])
-
-  const dates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
-
-  if (loading) {
-    return (
-      <div className="py-16 text-center text-violet-300">
-        <div className="text-5xl mb-3 animate-pulse">📅</div>
-        <p className="text-sm">Loading history…</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="py-6">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-violet-900">History</h2>
-        <p className="text-violet-400 text-sm mt-0.5">Past care logs</p>
-      </div>
-      {dates.length === 0 ? (
-        <div className="bg-white rounded-3xl shadow-sm shadow-violet-100 p-10 text-center">
-          <div className="text-5xl mb-3">📭</div>
-          <p className="text-gray-400 font-medium">No past logs yet</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {dates.map(date => (
-            <DayCard key={date} date={date} entries={grouped[date]} />
-          ))}
         </div>
       )}
     </div>

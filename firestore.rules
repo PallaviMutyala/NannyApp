@@ -21,23 +21,25 @@ service cloud.firestore {
       allow update, delete: if request.auth != null && myFamilyId() == familyId;
     }
 
-    // Logs — scoped to family
-    // Read: must belong to your family (or be your own log without a familyId — migration window)
-    // Write: must be your own log and tagged with your familyId
+    // Logs — one shared log per family per day (docId = familyId_date).
+    // Any family member can read, create, edit, and delete their family's logs.
     match /logs/{logId} {
-      allow read: if request.auth != null && (
-        resource.data.loggedBy == request.auth.uid ||
-        ('familyId' in resource.data && resource.data.familyId == myFamilyId())
-      );
+      // get on a missing doc has resource == null; allow if logId belongs to this family
+      function isMyFamilyLogId() {
+        return logId.matches('^' + myFamilyId() + '_.+');
+      }
+      allow read: if request.auth != null
+        && (
+          (resource != null && resource.data.familyId == myFamilyId())
+          || (resource == null && isMyFamilyLogId())
+        );
       allow create: if request.auth != null
-        && request.resource.data.loggedBy == request.auth.uid
         && request.resource.data.familyId == myFamilyId();
       allow update: if request.auth != null
-        && resource.data.loggedBy == request.auth.uid
-        && (
-          !('familyId' in resource.data) ||
-          request.resource.data.familyId == resource.data.familyId
-        );
+        && resource.data.familyId == myFamilyId()
+        && request.resource.data.familyId == resource.data.familyId;
+      allow delete: if request.auth != null
+        && resource.data.familyId == myFamilyId();
     }
   }
 }

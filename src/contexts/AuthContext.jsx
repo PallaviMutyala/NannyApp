@@ -7,8 +7,8 @@ import {
   updateProfile,
 } from 'firebase/auth'
 import {
-  doc, setDoc, getDoc, getDocs, updateDoc, writeBatch,
-  collection, query, where, serverTimestamp,
+  doc, setDoc, getDoc, updateDoc,
+  collection, query, where, getDocs, serverTimestamp,
 } from 'firebase/firestore'
 import { auth, db } from '../firebase/config'
 
@@ -31,25 +31,14 @@ async function lookupFamilyByCode(code) {
   return { id: snap.docs[0].id, ...snap.docs[0].data() }
 }
 
-async function backfillLogFamilyId(uid, familyId) {
-  const logsSnap = await getDocs(query(collection(db, 'logs'), where('loggedBy', '==', uid)))
-  const unmigrated = logsSnap.docs.filter(d => !d.data().familyId)
-  if (unmigrated.length === 0) return
-  const batch = writeBatch(db)
-  unmigrated.forEach(d => batch.update(d.ref, { familyId }))
-  await batch.commit()
-}
-
-async function migrateToFamily(uid, profile) {
+async function createFamilyFor(uid) {
   const familyRef = doc(collection(db, 'families'))
   await setDoc(familyRef, {
     inviteCode: generateInviteCode(),
     createdBy: uid,
     createdAt: serverTimestamp(),
   })
-  await updateDoc(doc(db, 'users', uid), { familyId: familyRef.id })
-  await backfillLogFamilyId(uid, familyRef.id)
-  return { ...profile, familyId: familyRef.id }
+  return familyRef.id
 }
 
 export function AuthProvider({ children }) {
@@ -68,13 +57,7 @@ export function AuthProvider({ children }) {
       if (!family) throw new Error('Invalid invite code. Please check with your family.')
       familyId = family.id
     } else {
-      const familyRef = doc(collection(db, 'families'))
-      familyId = familyRef.id
-      await setDoc(familyRef, {
-        inviteCode: generateInviteCode(),
-        createdBy: cred.user.uid,
-        createdAt: serverTimestamp(),
-      })
+      familyId = await createFamilyFor(cred.user.uid)
     }
 
     await setDoc(doc(db, 'users', cred.user.uid), {
@@ -92,39 +75,70 @@ export function AuthProvider({ children }) {
     return signOut(auth)
   }
 
+  async function setHourlyRate(rate) {
+    await updateDoc(doc(db, 'families', userProfile.familyId), { hourlyRate: rate })
+    setFamilyData(f => ({ ...f, hourlyRate: rate }))
+  }
+
+  // Switch the current user into an existing family by invite code.
+  async function joinFamily(inviteCode) {
+    const family = await lookupFamilyByCode(inviteCode)
+    if (!family) throw new Error('Invalid invite code. Please check and try again.')
+    if (family.id === userProfile?.familyId) throw new Error("You're already in this family.")
+    await updateDoc(doc(db, 'users', currentUser.uid), { familyId: family.id })
+    setUserProfile(p => ({ ...p, familyId: family.id }))
+    setFamilyData({ inviteCode: family.inviteCode, createdBy: family.createdBy, createdAt: family.createdAt })
+    return family
+  }
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user)
-      if (user) {
-        const snap = await getDoc(doc(db, 'users', user.uid))
-        let profile = snap.exists() ? snap.data() : null
+      try {
+        if (user) {
+          const snap = await getDoc(doc(db, 'users', user.uid))
+          let profile = snap.exists() ? snap.data() : null
 
-        if (profile && !profile.familyId) {
-          profile = await migrateToFamily(user.uid, profile)
-        } else if (profile?.familyId) {
-          await backfillLogFamilyId(user.uid, profile.familyId)
+          // Safety net: every user must belong to a family
+          if (profile && !profile.familyId) {
+            const familyId = await createFamilyFor(user.uid)
+            await updateDoc(doc(db, 'users', user.uid), { familyId })
+            profile = { ...profile, familyId }
+          }
+
+          setUserProfile(profile)
+
+          if (profile?.familyId) {
+            const fSnap = await getDoc(doc(db, 'families', profile.familyId))
+            setFamilyData(fSnap.exists() ? fSnap.data() : null)
+          }
+        } else {
+          setUserProfile(null)
+          setFamilyData(null)
         }
-
-        setUserProfile(profile)
-
-        if (profile?.familyId) {
-          const fSnap = await getDoc(doc(db, 'families', profile.familyId))
-          setFamilyData(fSnap.exists() ? fSnap.data() : null)
-        }
-      } else {
-        setUserProfile(null)
-        setFamilyData(null)
+      } catch (err) {
+        console.error('Auth state error:', err)
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     })
     return unsub
   }, [])
 
-  const value = { currentUser, userProfile, familyData, signup, login, logout }
+  const value = { currentUser, userProfile, familyData, signup, login, logout, joinFamily, setHourlyRate }
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {loading ? <AuthLoading /> : children}
     </AuthContext.Provider>
+  )
+}
+
+function AuthLoading() {
+  return (
+    <div className="fixed inset-0 flex flex-col items-center justify-center gap-4 bg-violet-50">
+      <div className="w-14 h-14 rounded-2xl bg-violet-600 flex items-center justify-center text-3xl">🍼</div>
+      <div className="w-7 h-7 border-[3px] border-violet-200 border-t-violet-600 rounded-full animate-spin" />
+    </div>
   )
 }
